@@ -1,85 +1,105 @@
-import sqlalchemy
-import sqlalchemy as sq
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+import psycopg2
+from psycopg2.sql import SQL, Identifier
 
-Base = declarative_base()
+# Функция, создающая структуру БД (таблицы).
+def create_db(conn):
+    with conn.cursor() as cur:
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS clients(
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(60) NOT NULL,
+        surname VARCHAR(60) NOT NULL,
+        email VARCHAR(60) NOT NULL
+        );
+        """)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS telephones(
+        telephone VARCHAR(60),
+        client_id INTEGER NOT NULL REFERENCES clients(id)
+        );
+        """)
+    conn.commit()
+
+# Функция, позволяющая добавить нового клиента.
+def add_client(conn, first_name, last_name, email, phones=None):
+    with conn.cursor() as cur:
+        cur.execute("""
+        INSERT INTO clients(name,surname,email) VALUES (%s,%s,%s);
+        """,(first_name, last_name, email))
+    conn.commit()
+
+# Функция, позволяющая добавить телефон для существующего клиента.
+def add_phone(conn, client_id, phone):
+    with conn.cursor() as cur:
+        cur.execute("""
+        INSERT INTO telephones(client_id,telephone) VALUES (%s,%s);
+        """,(client_id,phone))
+    conn.commit()
+
+# Функция, позволяющая изменить данные о клиенте.
+# замена для всех полей
+def change_client2(conn, client_id, first_name=None, last_name=None, email=None):
+    with conn.cursor() as cur:
+        cur.execute("""
+        UPDATE clients SET name =%s,surname =%s,email=%s WHERE id=%s;
+        """,(first_name, last_name, email,client_id,))
+    conn.commit()
+# замена одного или несколько полей
+def change_client(conn, client_id, name=None, surname=None, email=None):
+    with conn.cursor() as cur:
+        arg_list = {'name': name, "surname": surname, 'email': email}
+        for key, arg in arg_list.items():
+            if arg:
+                cur.execute(SQL("UPDATE clients SET {}=%s WHERE id=%s").format(Identifier(key)), (arg, client_id))
+        cur.execute("""
+            SELECT * FROM clients
+            WHERE id=%s
+            """, client_id)
+        return cur.fetchall()
 
 
-class Publisher(Base):
-    __tablename__ = "publisher"
 
-    id = sq.Column(sq.Integer, primary_key=True)
-    name = sq.Column(sq.String(length=40), unique=True)
+# Функция, позволяющая удалить телефон для существующего клиента.
+def delete_phone(conn, client_id):
+    with conn.cursor() as cur:
+        cur.execute("""
+           DELETE FROM telephones WHERE client_id=%s;
+           """, (client_id))
+    conn.commit()
 
-class Book(Base):
-    __tablename__ = "book"
+# Функция, позволяющая удалить существующего клиента.
+def delete_client(conn, client_id):
+    with conn.cursor() as cur:
+        cur.execute("""
+        DELETE FROM clients WHERE id=%s;
+        """,(client_id,))
+    conn.commit()
 
-    id = sq.Column(sq.Integer, primary_key=True)
-    title = sq.Column(sq.Text, nullable=False)
-    id_publisher = sq.Column(sq.Integer, sq.ForeignKey("publisher.id"), nullable=False)
-
-    publisher = relationship(Publisher, backref="book")
-
-class Shop(Base):
-    __tablename__ = "shop"
-
-    id = sq.Column(sq.Integer, primary_key=True)
-    name = sq.Column(sq.String(length=40), unique=True)
-
-class Stock(Base):
-    __tablename__ = "stock"
-
-    id = sq.Column(sq.Integer, primary_key=True)
-    count = sq.Column(sq.Integer)
-    id_book = sq.Column(sq.Integer, sq.ForeignKey("book.id"), nullable=False)
-    id_shop = sq.Column(sq.Integer, sq.ForeignKey("shop.id"), nullable=False)
-
-    book = relationship(Book, backref="book")
-    shop = relationship(Shop, backref="shop")
-
-class Sale(Base):
-    __tablename__ = "sale"
-
-    id = sq.Column(sq.Integer, primary_key=True)
-    count = sq.Column(sq.Integer)
-    price = sq.Column(sq.Integer)
-    date_sale = sq.Column(sq.String(length=40))
-    id_stock = sq.Column(sq.Integer, sq.ForeignKey("stock.id"), nullable=False)
-
-    stock = relationship(Stock, backref="stock")
-
-def create_tables(engine):
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+# Функция, позволяющая найти клиента по его данным: имени, фамилии, email или телефону.
+def find_client(conn, searchword):
+    with conn.cursor() as cur:
+        cur.execute("""
+        SELECT * FROM clients
+        JOIN telephones ON client_id = id
+        WHERE name =%s OR surname =%s OR email =%s OR telephone =%s
+        """,(searchword,searchword,searchword,searchword,))
+        return cur.fetchall()
+    conn.commit()
 
 
+with psycopg2.connect(database="homework_db",user="postgres",password="12345") as conn:
+    # вызывайте функции здесь
+    #create_db(conn)
+    #add_client(conn, 'Alex', 'Ivanov', 'alex.ivanov@test.ru')
+    #add_client(conn, 'Ivan', 'Pavlov', 'ivan.pavlov@test.ru')
+    #add_client(conn, 'Olga', 'Somova', 'olga.somova@test.ru')
+    # add_phone(conn, '1', '+79215555555')
+    # add_phone(conn, '2', '+79215555556')
+    # add_phone(conn, '3', '+79215555558')
+    # delete_phone(conn, '1')
+    # delete_client(conn, '1')
+    # change_client2(conn, '3','Anna','Somova','anna.somova@test.ru')
+    print(change_client(conn, '3','Olga',email='olga.somova@test.ru'))
+    print(find_client(conn,'Olga'))
 
-# Задание 2
-# Используя SQLAlchemy, составить запрос выборки магазинов, продающих целевого издателя.
-#
-# Напишите Python-скрипт, который:
-#
-# подключается к БД любого типа на ваш выбор, например, к PostgreSQL;
-# импортирует необходимые модели данных;
-# принимает имя или идентификатор издателя (publisher), например, через input(). Выводит построчно факты покупки книг этого издателя:
-
-DSN = 'postgresql://postgres:postgres@localhost:5432/homework_db'
-engine = sqlalchemy.create_engine(DSN)
-# create_tables(engine)
-
- # сессия
-Session = sessionmaker(bind=engine)
-session = Session()
-
-requested_publisher = input("Укажите издателя:")
-
-q = session.query(Book.title, Shop.name, Sale.price, Sale.date_sale).join(Publisher).join(Stock).join(Shop).join(Sale).filter(Publisher.name.like(requested_publisher))
-# 1 вариант:
-print(q)
-print([[s[0]] + [s[1]] + [str(s[2])] + [str(s[3])] for s in q.all()])
-# 2 вариант:
-for s in q.all():
-    print(f'{s[0]} | {s[1]} | {s[2]} | {s[3]}')
-
-session.close()
-
+conn.close()
